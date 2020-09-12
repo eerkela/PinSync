@@ -45,11 +45,16 @@ class Pin:
             os.makedirs(path)
 
         path = os.path.join(path, self.id + self.extension)
-        r = requests.get(url=self.url, stream=True)
-        if r.status_code == 200:
-            with open(path, 'wb') as f:
-                for chunk in r.iter_content(1024):
-                    f.write(chunk)
+        print('\t+ ' + path)
+        try:
+            r = requests.get(url=self.url, stream=True)
+            if r.status_code == 200:
+                with open(path, 'wb') as f:
+                    for chunk in r.iter_content(1024):
+                        f.write(chunk)
+        except KeyboardInterrupt:
+            os.remove(path)
+            raise
 
     def __str__(self):
         return self.id
@@ -72,61 +77,71 @@ class Client:
                                 cred_root=credentials['cred_root'])
         self.client.login()
 
-        # pre-compute board names/ids
+        # build board name - id map
         self.boards = {}
         for b in self.client.boards():
             self.boards[b['name']] = b['id']
 
-        # pre-compute section names/ids for each board
+        # build section name - id map for each board
         self.sections = {}
-        for board_name in self.boards.keys():
-            self.sections[board_name] = {}
-            board_id = self.boards[board_name]
+        for board in self.boards.keys():
+            self.sections[board] = {}
+            board_id = self.boards[board]
             for s in self.client.get_board_sections(board_id=board_id):
-                self.sections[board_name][s['title']] = s['id']
+                self.sections[board][s['title']] = s['id']
+
+        # set up pin cache
+        self.cache = {}
 
     def get_boards(self):
         '''Retrieves list of all boards belonging to current user.'''
         return list(self.boards.keys())
 
-    def get_id(self, board, section=None):
-        '''Retrieves id of board/section.'''
-        if section:
-            return self.sections[board][section]
-        return self.boards[board]
-
-    def get_sections(self, board_name):
+    def get_sections(self, board):
         '''Retrieves list of sections within associated board.  Throws KeyError
         if board cannot be found.'''
-        if board_name not in self.get_boards():
-            raise KeyError('Board not found: %s' % board_name)
-        return list(self.sections[board_name].keys())
+        if board not in self.get_boards():
+            raise KeyError('Board not found: %s' % board)
+        return list(self.sections[board].keys())
 
-    def get_pins(self, board_name, section_name=None):
+    def get_pins(self, board, section=None):
         '''Retrieves list of pins within named board/section.
 
-        In: board_name <str>, name of board to retrieve contents of.
-            section_name <str>, name of section within board to retrieve
+        In: board <str>, name of board to retrieve contents of.
+            section <str>, name of section within board to retrieve
                 contents of.  None represents the base board, disregarding any
                 sections that may be present.
         Out: List[Pin] of pins present within board/section.
         '''
+        if board in self.cache.keys():
+            if not section:
+                return [v for v in self.cache[board].values()
+                        if isinstance(v, Pin)]
+            elif section in self.cache[board].keys():
+                return list(self.cache[board][section].values())
 
-        if section_name:
-            section_id = self.get_id(board_name, section_name)
+
+        if section:
+            section_id = self.sections[board][section]
             pins = []
             batch = self.client.get_section_pins(section_id=section_id)
             while (batch):
                 for response in batch:
                     try:
-                        p = Pin(response)
+                        p = Pin(response, section)
                     except:
                         continue
                     pins.append(p)
                 batch = self.client.get_section_pins(section_id=section_id)
+            if board not in self.cache.keys():
+                self.cache[board] = {}
+            if section not in self.cache[board].keys():
+                self.cache[board][section] = {}
+            for pin in pins:
+                self.cache[board][section][pin.id] = pin
             return pins
 
-        board_id = self.boards[board_name]
+        board_id = self.boards[board]
         pins = []
         batch = self.client.board_feed(board_id=board_id)
         while (batch):
@@ -137,28 +152,36 @@ class Client:
                     continue
                 pins.append(p)
             batch = self.client.board_feed(board_id=board_id)
+        if board not in self.cache.keys():
+            self.cache[board] = {}
+        for pin in pins:
+            self.cache[board][pin.id] = pin
         return pins
 
     def delete(self, pin_id, board, section=None):
         ''' Deletes a pin from Pinterest.
 
         In: pin_id <str>, id of pin to delete.
-            board_name <str>, name of board to delete pin from.
-            section_name <str>, name of section to delete pin from, if any.
+            board <str>, name of board to delete pin from.
+            section <str>, name of section to delete pin from, if any.
         Out: Bool, true if deletion successful.
         Throws: Exception if pin is not present on Pinterest.
         '''
         ids = [p.id for p in self.get_pins(board, section)]
         if pin_id in ids:
             self.client.delete_pin(pin_id=pin_id)
+            if section:
+                self.cache[board][section].pop(pin_id)
+            else:
+                self.cache[board].pop(pin_id)
             return True
         return False
 
     def print(self, board, section=None):
         '''Prints structure and member pins present in Pinterest feed.  If
-        board_name is specified, limits results to given board.
+        board is specified, limits results to given board.
 
-        In: board_name <str>, name of board, if any, to limit results to.
+        In: board <str>, name of board, if any, to limit results to.
         Out: void.  Prints results to console.
         '''
         if section:
@@ -193,7 +216,6 @@ if __name__ == '__main__':
     }
 
     c = Client(credentials)
-    c.print('The Waking World')
 
 
 

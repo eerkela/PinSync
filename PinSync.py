@@ -4,7 +4,6 @@ import os
 from dotenv import load_dotenv
 
 from Manifest import Manifest
-from Comparator import Comparator
 from Client import Client
 
 
@@ -34,7 +33,7 @@ CREDENTIALS = {
     'username' : os.getenv('PINTEREST_USERNAME'),
     'cred_root' : os.getenv('CREDENTIALS_ROOT_DIR')
 }
-DOWNLOAD_DIR = os.getenv('LOCAL_PARENT_DIR')
+DOWNLOAD_DIR = os.getenv('DOWNLOAD_DIR')
 
 
 class Manager:
@@ -51,7 +50,6 @@ class Manager:
         self.root = download_dir
         self.manifest = Manifest(self.root)
 
-
     def sync(self, board, section=None):
         '''Sync a board/section on Pinterest to local storage.
 
@@ -60,13 +58,8 @@ class Manager:
                 represents the base board, disregarding any sections that may
                 be present.
         '''
-        if board not in self.manifest.get_boards():
-            os.mkdir(os.path.join(self.root, board))
-        if (section and section not in self.manifest.get_sections(board)):
-            os.mkdir(os.path.join(self.root, board, section))
-
         # Reflect local changes:
-        self.push_local_changes(board, section)
+        #self.push_local_changes(board, section)
 
         # Remove local files that have been deleted from Pinterest:
         local = self.manifest.get_contents(board, section)
@@ -75,7 +68,7 @@ class Manager:
         cloud_ids = [p.id for p in cloud]
         for image in local:
             if image.id not in cloud_ids:
-                image.delete()
+                image.delete(self.manifest.cache)
 
         # Download images that are missing on local storage:
         for pin in cloud:
@@ -117,14 +110,14 @@ class Manager:
         '''Syncs all boards of current user to local storage.'''
         for board in self.client.get_boards():
             print('%s' % board)
+            self.sync(board)
             for section in self.client.get_sections(board):
                 print('%s/%s' % (board, section))
                 self.sync(board, section)
-            self.sync(board)
         self.manifest.save()
 
 
 if __name__ == '__main__':
     p = Manager(CREDENTIALS, DOWNLOAD_DIR)
-    p.push_local_changes('test')
+    p.sync_all()
     p.client.logout()

@@ -48,23 +48,33 @@ class Image:
         self.section = components[1]
         self.id = ''.join(components[-1].split('.')[:-1])
 
-        self.image = cv2.imread(path)
-        self.hash = dhash(self.image)
+        image = cv2.imread(path)
+        self.hash = dhash(image)
 
-        (height, width, _) = self.image.shape
+        (height, width, _) = image.shape
         self.height = height
         self.width = width
         self.size = height * width
-        self.color = tuple(self.image.mean(axis=0).mean(axis=0))
+        self.color = tuple(image.mean(axis=0).mean(axis=0))
 
-    def delete(self):
+    def delete(self, cache=None):
         print('\t- ' + self.path)
         os.remove(self.path)
+
         # Remove empty directories
         (head, tail) = os.path.split(self.path)
         while (len(os.listdir(head)) == 0):
             os.rmdir(head)
             (head, tail) = os.path.split(head)
+
+        # Remove from cache if supplied
+        if cache:
+            if self.board in cache.keys():
+                if self.section:
+                    if self.section in cache[self.board].keys():
+                        cache[self.board][self.section].pop(self.id)
+                else:
+                    cache[self.board].pop(self.id)
 
     def to_json(self):
         result = {
@@ -131,9 +141,12 @@ class Manifest:
 
         # retrieve cached contents if available
         if board in self.cache.keys():
-            if section and section in self.cache[board].keys():
+            if not section:
+                return [v for v in self.cache[board].values()
+                        if isinstance(v, Image)]
+            elif section in self.cache[board].keys():
                 return list(self.cache[board][section].values())
-            return [v for v in self.cache[board].values() if isinstance(v, Image)]
+
 
         # If result is not already cached, compute and cache it
         board_path = os.path.join(self.root, board)
@@ -143,7 +156,7 @@ class Manifest:
             for (dirpath, dirnames, filenames) in os.walk(sec_path):
                 for file in filenames:
                     if (file not in self.systemfiles):
-                        file_path = os.path.join(dirpath, file)
+                        file_path = os.path.join(sec_path, dirpath, file)
                         image = Image(file_path)
                         contents.append(image)
             # Cache contents
@@ -211,8 +224,7 @@ class Manifest:
             choice = max(images, key=lambda im: im.size)
             for image in images:
                 if (image.id != choice.id):
-                    print('\t[dup] %s' % image.path)
-                    image.delete()
+                    image.delete(self.cache)
                     removed.append(image)
         return removed
 
@@ -235,7 +247,7 @@ class Manifest:
 if __name__ == '__main__':
     wd = '/home/eerkela/drive/DnD/The Waking World/Images'
     m = Manifest(wd)
-    print(m.get_deleted_images('test'))
+    print(len(m.get_contents('The Waking World')))
 
     #m.save()
 
