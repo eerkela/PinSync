@@ -302,8 +302,8 @@ class Section(Container):
         for (dirpath, dirnames, filenames) in os.walk(self.path, topdown=True):
             dirnames[:] = [d for d in dirnames if d not in SYSTEMDIRS]
             for file in filenames:
-                extension = '.' + file[file.rfind('.'):]
                 if file not in SYSTEMFILES:
+                    extension = file[file.rfind('.'):]
                     if extension in VALID_FILETYPES:
                         file_path = os.path.join(dirpath, file)
                         image = Image(file_path)
