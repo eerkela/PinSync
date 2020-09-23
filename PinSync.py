@@ -25,6 +25,13 @@ from Client import Client
        If a tie is encountered, keep the older file (lowest id).
 '''
 
+'''
+More OOP:
+- Board object.  Sections/pins/id/etc
+- Section object.
+- metadata stored within each board/section
+'''
+
 
 load_dotenv()
 CREDENTIALS = {
@@ -45,10 +52,9 @@ class Manager:
         download_dir <str>, path to local download directory.
     '''
 
-    def __init__(self, pinterest_credentials, download_dir):
+    def __init__(self, pinterest_credentials):
         self.client = Client(pinterest_credentials)
-        self.root = download_dir
-        self.manifest = Manifest(self.root)
+        self.manifest = Manifest()
 
     def sync(self, board, section=None):
         '''Sync a board/section on Pinterest to local storage.
@@ -59,31 +65,32 @@ class Manager:
                 be present.
         '''
         # Reflect local changes:
-        #self.push_local_changes(board, section)
+        self.push_local_changes(board, section)
 
         # Remove local files that have been deleted from Pinterest:
-        local = self.manifest.get_contents(board, section)
-        cloud = self.client.get_pins(board, section)
-        local_ids = [i.id for i in local]
-        cloud_ids = [p.id for p in cloud]
-        for image in local:
-            if image.id not in cloud_ids:
-                image.delete(self.manifest.cache)
+        local = self.manifest.find(board, section)
+        cloud = self.client.find(board, section)
+        local_ids = [image.get_id() for image in local.get_images()]
+        cloud_ids = [pin.get_id() for pin in cloud.get_pins()]
+        for image in local.get_images():
+            if image.get_id() not in cloud_ids:
+                image.delete()
 
         # Download images that are missing on local storage:
-        for pin in cloud:
-            if pin.id not in local_ids:
-                pin.download(self.root)
+        for pin in cloud.get_pins():
+            if pin.get_id() not in local_ids:
+                pin.download()
 
         # Delete duplicates:
-        for image in self.manifest.remove_duplicates(board, section):
+        for image in local.remove_duplicates(board, section):
             try:
-                self.client.delete(image.id, board, section)
+                cloud.delete(image.get_id())
             except:
                 pass
 
     def push_local_changes(self, board, section=None):
-        deleted = self.manifest.get_deleted_images(board, section)
+        container = self.manifest.find(board, section)
+        deleted = container.get_deleted_images()
         if (len(deleted) > 0):
             msg = '\t> %d local files have been deleted since last sync.' \
                    % len(deleted)
@@ -101,7 +108,8 @@ class Manager:
             if response.lower() in affirmative:
                 for id in deleted:
                     try:
-                        self.client.delete(id, board, section)
+                        cloud_container = self.client.find(board, section)
+                        cloud_container.delete(id)
                     except:
                         pass
             print()
@@ -110,14 +118,16 @@ class Manager:
         '''Syncs all boards of current user to local storage.'''
         for board in self.client.get_boards():
             print('%s' % board)
-            self.sync(board)
-            for section in self.client.get_sections(board):
+            self.sync(board.get_name())
+            for section in board.get_sections():
                 print('%s/%s' % (board, section))
-                self.sync(board, section)
+                self.sync(board.get_name(), section.get_name())
         self.manifest.save()
 
 
 if __name__ == '__main__':
-    p = Manager(CREDENTIALS, DOWNLOAD_DIR)
-    p.sync_all()
+    os.chdir(DOWNLOAD_DIR)
+
+    p = Manager(CREDENTIALS)
+    p.sync('test')
     p.client.logout()

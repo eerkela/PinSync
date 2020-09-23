@@ -5,6 +5,87 @@ from dotenv import load_dotenv
 from py3pin.Pinterest import Pinterest
 
 
+class Container:
+
+    client = None
+    name = None
+    id = None
+    pins = []
+
+    def get_name(self):
+        return self.name
+
+    def get_id(self):
+        return self.id
+
+    def get_pins(self):
+        return self.pins
+
+    def download(self):
+        for pin in self.pins:
+            pin.download()
+
+    def delete(self, pin_id):
+        index = 0
+        for p in self.pins:
+            if p.get_id() == pin_id:
+                self.client.delete_pin(pin_id=pin_id)
+                return self.pins.pop(index)
+            index += 1
+        return None
+
+    def __str__(self):
+        return self.name
+
+
+class Board(Container):
+
+    def __init__(self, client, json_response):
+        self.client = client
+        self.name = json_response['name']
+        self.id = json_response['id']
+
+        # get board sections
+        self.sections = []
+        for section in self.client.get_board_sections(board_id=self.id):
+            s = Section(self.client, section)
+            self.sections.append(s)
+
+        # get board pins
+        self.pins = []
+        batch = self.client.board_feed(board_id=self.id)
+        while (batch):
+            for response in batch:
+                try:
+                    p = Pin(response)
+                except:
+                    continue
+                self.pins.append(p)
+            batch = self.client.board_feed(board_id=self.id)
+
+    def get_sections(self):
+        return self.sections
+
+
+class Section(Container):
+
+    def __init__(self, client, json_response):
+        self.client = client
+        self.name = json_response['title']
+        self.id = json_response['id']
+
+        self.pins = []
+        batch = self.client.get_section_pins(section_id=self.id)
+        while (batch):
+            for response in batch:
+                try:
+                    p = Pin(response, self.name)
+                except:
+                    continue
+                self.pins.append(p)
+            batch = self.client.get_section_pins(section_id=self.id)
+
+
 class Pin:
     '''Defines a pin object given its response from the Pinterest API
     (API Reference: https://developers.pinterest.com/docs/api/pins/).
@@ -14,10 +95,9 @@ class Pin:
         section_name <str>, name of section (if any) to which the pin belongs.
     '''
 
-
     def __init__(self, json_response, section_name=None):
-        self.id = json_response['id']
         self.name = json_response['title']
+        self.id = json_response['id']
         self.description = json_response['description']
 
         self.board = json_response['board']['name']
@@ -27,6 +107,30 @@ class Pin:
         self.extension = '.' + self.url.split('.')[-1]
         self.image_height = json_response['images']['orig']['height']
         self.image_width = json_response['images']['orig']['width']
+
+    def get_name(self):
+        return self.name
+
+    def get_id(self):
+        return self.id
+
+    def get_description(self):
+        return self.description
+
+    def get_board(self):
+        return self.board
+
+    def get_section(self):
+        return self.section
+
+    def get_url(self):
+        return self.url
+
+    def get_extension(self):
+        return self.extension
+
+    def get_dimensions(self):
+        return (self.image_height, self.image_width)
 
     def download(self, root_dir):
         ''' Downloads a given pin to local storage.
@@ -77,32 +181,21 @@ class Client:
                                 cred_root=credentials['cred_root'])
         self.client.login()
 
-        # build board name - id map
-        self.boards = {}
-        for b in self.client.boards():
-            self.boards[b['name']] = b['id']
-
-        # build section name - id map for each board
-        self.sections = {}
-        for board in self.boards.keys():
-            self.sections[board] = {}
-            board_id = self.boards[board]
-            for s in self.client.get_board_sections(board_id=board_id):
-                self.sections[board][s['title']] = s['id']
-
-        # set up pin cache
-        self.cache = {}
+        # get contents
+        self.contents = []
+        for board in self.client.boards():
+            b = Board(self.client, board)
+            self.contents.append(b)
 
     def get_boards(self):
         '''Retrieves list of all boards belonging to current user.'''
-        return list(self.boards.keys())
+        return self.contents
 
     def get_sections(self, board):
         '''Retrieves list of sections within associated board.  Throws KeyError
         if board cannot be found.'''
-        if board not in self.get_boards():
-            raise KeyError('Board not found: %s' % board)
-        return list(self.sections[board].keys())
+        b = self.find(board)
+        return b.get_sections()
 
     def get_pins(self, board, section=None):
         '''Retrieves list of pins within named board/section.
@@ -113,93 +206,38 @@ class Client:
                 sections that may be present.
         Out: List[Pin] of pins present within board/section.
         '''
-        if board in self.cache.keys():
-            if not section:
-                return [v for v in self.cache[board].values()
-                        if isinstance(v, Pin)]
-            elif section in self.cache[board].keys():
-                return list(self.cache[board][section].values())
+        container = self.find(board, section)
+        return container.get_pins()
 
+    def find(self, board_name, section_name=None, pin_id=None):
+        def find_board(board):
+            for b in self.contents:
+                if b.get_name() == board:
+                    return b
+            raise Exception('Board not found: %s' % board)
 
-        if section:
-            section_id = self.sections[board][section]
-            pins = []
-            batch = self.client.get_section_pins(section_id=section_id)
-            while (batch):
-                for response in batch:
-                    try:
-                        p = Pin(response, section)
-                    except:
-                        continue
-                    pins.append(p)
-                batch = self.client.get_section_pins(section_id=section_id)
-            if board not in self.cache.keys():
-                self.cache[board] = {}
-            if section not in self.cache[board].keys():
-                self.cache[board][section] = {}
-            for pin in pins:
-                self.cache[board][section][pin.id] = pin
-            return pins
+        def find_section(b, section):
+            for s in b.get_sections():
+                if s.get_name() == section:
+                    return s
+            raise Exception('Section not found: %s/%s' % (board, section))
 
-        board_id = self.boards[board]
-        pins = []
-        batch = self.client.board_feed(board_id=board_id)
-        while (batch):
-            for response in batch:
-                try:
-                    p = Pin(response)
-                except:
-                    continue
-                pins.append(p)
-            batch = self.client.board_feed(board_id=board_id)
-        if board not in self.cache.keys():
-            self.cache[board] = {}
-        for pin in pins:
-            self.cache[board][pin.id] = pin
-        return pins
+        def find_pin(container, pin):
+            for p in container.get_pins():
+                if p.get_id() == pin:
+                    return p
+            raise Exception('Pin not found: %s' % pin)
 
-    def delete(self, pin_id, board, section=None):
-        ''' Deletes a pin from Pinterest.
+        b = find_board(board_name)
+        if section_name:
+            s = find_section(b, section_name)
+            if pin_id:
+                return find_pin(s, pin_id)
+            return s
+        if pin_id:
+            return find_pin(b, pin_id)
+        return b
 
-        In: pin_id <str>, id of pin to delete.
-            board <str>, name of board to delete pin from.
-            section <str>, name of section to delete pin from, if any.
-        Out: Bool, true if deletion successful.
-        Throws: Exception if pin is not present on Pinterest.
-        '''
-        ids = [p.id for p in self.get_pins(board, section)]
-        if pin_id in ids:
-            self.client.delete_pin(pin_id=pin_id)
-            if section:
-                self.cache[board][section].pop(pin_id)
-            else:
-                self.cache[board].pop(pin_id)
-            return True
-        return False
-
-    def print(self, board, section=None):
-        '''Prints structure and member pins present in Pinterest feed.  If
-        board is specified, limits results to given board.
-
-        In: board <str>, name of board, if any, to limit results to.
-        Out: void.  Prints results to console.
-        '''
-        if section:
-            print('\t%s' % section)
-            for pin in self.get_pins(board, section):
-                print('\t\t%s' % pin.id)
-        else:
-            print('%s' % board)
-            for pin in self.get_pins(board):
-                print('\t%s' % pin.id)
-            for section in self.get_sections(board):
-                print('\t%s' % section)
-                for pin in self.get_pins(board, section):
-                    print('\t\t%s' % pin.id)
-
-    def print_all(self):
-        for board in self.get_boards():
-            self.print(board)
 
     def logout(self):
         '''Log out of current Pinterest session.'''
@@ -216,32 +254,11 @@ if __name__ == '__main__':
     }
 
     c = Client(credentials)
-
-
-
-
-    '''
-    simulated_pin_response = {
-        'id' : '123456789',
-        'title' : 'xyz',
-        'description' : None,
-        'board' : 'test_board',
-        'images' : {
-            'orig' : {
-                'url' : 'www.notreal.jpg',
-                'height' : 44,
-                'width' : 200
-            }
-        }
-    }
-
-    p = Pin(simulated_pin_response, 'test_section')
-    pins = []
-    pins.append(p)
-    for temp in pins:
-        print(temp.id)
-        print(temp.name)
-        print(temp.description)
-        print(temp.board)
-        print(temp.section)
-    '''
+    for b in c.get_boards():
+        print('%s' % b.get_name())
+        for p in b.get_pins():
+            print('\t%s' % p.get_id())
+        for s in b.get_sections():
+            print('\t%s' % s.get_name())
+            for p in s.get_pins():
+                print('\t\t%s' % p.get_id())
