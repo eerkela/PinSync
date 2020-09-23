@@ -11,6 +11,20 @@ SYSTEMDIRS = ['.git', '__pycache__', 'credentials', 'tokens']
 SYSTEMFILES = ['.env', '.gitignore', 'desktop.ini', 'PinSync.py', 'Client.py',
                'Manifest.py', 'manifest.json']
 MAX_THREADS = os.cpu_count() * 4
+VALID_FILETYPES = [ # determined by cv2.imread()
+    # https://docs.opencv.org/4.3.0/d4/da8/group__imgcodecs.html#ga288b8b3da0892bd651fce07b3bbd3a56
+    '.bmp', '.dib',
+    '.jpeg', '.jpg', '.jpe',
+    '.jp2',
+    '.png',
+    '.webp',
+    '.pbm', '.pgm', '.ppm', '.pxm', '.pnm',
+    '.pfm',
+    '.sr', '.ras',
+    '.tiff', '.tif',
+    '.exr',
+    '.hdr', '.pic',
+]
 
 
 class Container:
@@ -34,16 +48,30 @@ class Container:
     images = []
     old = []
 
-    def find_pin(self, pin_id: str) -> Optional[Pin]:
-        for pin in self.pins:
-            if pin.id == pin_id:
-                return pin
+    def delete_pin(self, pin_id: str) -> Optional[Pin]:
+        index = 0
+        for p in self.pins:
+            if p.id == pin_id:
+                self.client.delete_pin(pin_id=pin_id)
+                return self.pins.pop(index)
+            index += 1
         return None
 
-    def find_image(self, image_id: str) -> Optional[Image]:
+    def delete_image(self, image_id: str) -> Optional[Image]:
+        index = 0
         for image in self.images:
             if image.id == image_id:
-                return image
+                print('\t- ' + image.path)
+                os.remove(image.path)
+
+                # Remove empty parent directories
+                (head, tail) = os.path.split(image.path)
+                while (len(os.listdir(head)) == 0):
+                    os.rmdir(head)
+                    (head, tail) = os.path.split(head)
+                return self.images.pop(index)
+            index += 1
+        return None
 
     def size(self) -> int:
         '''returns number of items in container on Pinterest.'''
@@ -69,7 +97,7 @@ class Container:
         # Remove local files that have been deleted from Pinterest:
         (not_on_disk, not_on_cloud) = self.get_differences()
         for image in not_on_cloud:
-            image.delete()
+            self.delete_image(image.id)
 
         # Download images that are missing on local storage:
         for pin in not_on_disk:
@@ -77,8 +105,7 @@ class Container:
 
         # Delete duplicates:
         for image in self.remove_duplicates():
-            pin = self.find_pin(image.id)
-            pin.delete()
+            self.delete_pin(image.id)
 
         # Save manifest:
         self.save_manifest()
@@ -114,8 +141,7 @@ class Container:
                 response = input(prompt)
             if response.lower() in affirmative:
                 for id in deleted:
-                    pin = self.find_pin(id)
-                    pin.delete()
+                    self.delete_pin(id)
             print()
 
     def duplicate_images(self) -> Dict[int, List[Image]]:
@@ -149,7 +175,7 @@ class Container:
             choice = max(images, key=lambda im: im.size)
             for image in images:
                 if (image.id != choice.id):
-                    image.delete()
+                    self.delete_image(image.id)
                     removed.append(image)
         return removed
 
@@ -204,7 +230,7 @@ class Board(Container):
         while (batch):
             for response in batch:
                 try:
-                    p = Pin(response, parent=self)
+                    p = Pin(response)
                 except:
                     continue
                 self.pins.append(p)
@@ -215,8 +241,13 @@ class Board(Container):
         for file in os.listdir(self.path):
             file_path = os.path.join(self.path, file)
             if (os.path.isfile(file_path) and file not in SYSTEMFILES):
-                image = Image(file_path, parent=self)
-                self.images.append(image)
+                extension = file[file.rfind('.'):]
+                if extension in VALID_FILETYPES:
+                    image = Image(file_path)
+                    self.images.append(image)
+                else:
+                    id = file[:file.rfind('.')]
+                    self.delete_pin(id)
 
         # gather previous contents
         manifest_path = os.path.join(self.path, 'manifest.json')
@@ -260,7 +291,7 @@ class Section(Container):
         while (batch):
             for response in batch:
                 try:
-                    p = Pin(response, self.name, parent=self)
+                    p = Pin(response, self.name)
                 except:
                     continue
                 self.pins.append(p)
@@ -271,10 +302,15 @@ class Section(Container):
         for (dirpath, dirnames, filenames) in os.walk(self.path, topdown=True):
             dirnames[:] = [d for d in dirnames if d not in SYSTEMDIRS]
             for file in filenames:
-                if (file not in SYSTEMFILES):
-                    file_path = os.path.join(dirpath, file)
-                    image = Image(file_path, parent=self)
-                    self.images.append(image)
+                extension = '.' + file[file.rfind('.'):]
+                if file not in SYSTEMFILES:
+                    if extension in VALID_FILETYPES:
+                        file_path = os.path.join(dirpath, file)
+                        image = Image(file_path)
+                        self.images.append(image)
+                    else:
+                        id = file[:file.rfind('.')]
+                        self.delete_pin(id)
 
         # gather previous contents
         manifest_path = os.path.join(self.path, 'manifest.json')

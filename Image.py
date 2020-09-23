@@ -23,11 +23,10 @@ class Image:
     necessarily on Pinterest.
     '''
 
-    def __init__(self, path, parent: Container = None):
+    def __init__(self, path):
         if not os.path.exists(path):
             raise Exception('Image not found: %s' % path)
         self.path = path
-        self.parent = parent
 
         components = path.split(os.sep)
         self.board = components[0]
@@ -42,26 +41,6 @@ class Image:
         self.width = width
         self.size = height * width
         self.color = tuple(image.mean(axis=0).mean(axis=0))
-
-    def delete(self):
-        ''' Deletes this image from local storage and removes it from parent
-        container.
-        '''
-        print('\t- ' + self.path)
-        os.remove(self.path)
-
-        # Remove empty parent directories
-        (head, tail) = os.path.split(self.path)
-        while (len(os.listdir(head)) == 0):
-            os.rmdir(head)
-            (head, tail) = os.path.split(head)
-
-        index = 0
-        for image in self.parent.images:
-            if image.id == self.id:
-                self.parent.images.pop(index)
-                break
-            index += 1
 
     def to_json(self):
         ''' Translates object into json format.  Used for manifest

@@ -11,9 +11,7 @@ class Pin:
     necessarily on local storage.
     '''
 
-    def __init__(self, json_response, section_name: str = None,
-                 parent: Container = None):
-        self.parent = parent
+    def __init__(self, json_response, section_name: str = None):
         self.name = json_response['title']
         self.id = json_response['id']
         self.description = json_response['description']
@@ -53,19 +51,6 @@ class Pin:
             raise
 
         return Image(self.image_path)
-
-    def delete(self):
-        ''' Deletes this pin from Pinterest and removes it from parent
-        container.
-        '''
-        self.parent.client.delete_pin(pin_id=self.id)
-
-        index = 0
-        for p in self.parent.pins:
-            if p.id == self.id:
-                self.parent.pins.pop(index)
-                break
-            index += 1
 
     def __str__(self):
         return self.id

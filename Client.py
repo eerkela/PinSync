@@ -85,6 +85,10 @@ if __name__ == '__main__':
     os.chdir(DOWNLOAD_DIR)
 
     c = Client(CREDENTIALS)
-    board = c.find('test')
-    board.sync()
+    for board in c.get_boards():
+        print(board.name)
+        board.sync()
+        for section in board.get_sections():
+            print('%s/%s' % (board.name, section.name))
+            section.sync()
     c.logout()
