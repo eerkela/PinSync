@@ -52,5 +52,8 @@ class Pin:
 
         return Image(self.image_path)
 
+    def to_json(self):
+        pass
+
     def __str__(self):
         return self.id

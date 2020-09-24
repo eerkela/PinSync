@@ -29,8 +29,8 @@ class Image:
         self.path = path
 
         components = path.split(os.sep)
-        self.board = components[0]
-        self.section = components[1]
+        self.board_name = components[0]
+        self.section_name = components[1]
         self.id = ''.join(components[-1].split('.')[:-1])
 
         image = cv2.imread(path)
@@ -48,8 +48,8 @@ class Image:
         '''
         result = {
             'id' : self.id,
-            'board' : self.board,
-            'section' : self.section,
+            'board_name' : self.board_name,
+            'section_name' : self.section_name,
             'path' : self.path,
             'hash' : self.hash,
             'height' : self.height,

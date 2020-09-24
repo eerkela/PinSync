@@ -233,7 +233,8 @@ class Board(Container):
                     p = Pin(response)
                 except:
                     continue
-                self.pins.append(p)
+                if p.extension in VALID_FILETYPES:
+                    self.pins.append(p)
             batch = self.client.board_feed(board_id=self.id)
 
         # get images
@@ -245,9 +246,6 @@ class Board(Container):
                 if extension in VALID_FILETYPES:
                     image = Image(file_path)
                     self.images.append(image)
-                else:
-                    id = file[:file.rfind('.')]
-                    self.delete_pin(id)
 
         # gather previous contents
         manifest_path = os.path.join(self.path, 'manifest.json')
@@ -294,7 +292,8 @@ class Section(Container):
                     p = Pin(response, self.name)
                 except:
                     continue
-                self.pins.append(p)
+                if p.extension in VALID_FILETYPES:
+                    self.pins.append(p)
             batch = self.client.get_section_pins(section_id=self.id)
 
         # get images
@@ -308,9 +307,6 @@ class Section(Container):
                         file_path = os.path.join(dirpath, file)
                         image = Image(file_path)
                         self.images.append(image)
-                    else:
-                        id = file[:file.rfind('.')]
-                        self.delete_pin(id)
 
         # gather previous contents
         manifest_path = os.path.join(self.path, 'manifest.json')
